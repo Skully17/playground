@@ -1,0 +1,11 @@
+Crossbar.io node private key - KEEP THIS SAFE!
+
+creator: dave@dave-work-pc
+created-at: 2023-04-27T13:39:40.600Z
+machine-id: 1a395e9335464976ac716936eb3eb3a5
+node-authid: dave-work-pc
+node-cluster-ip: 127.0.0.1
+public-key-ed25519: a146200d16763c43a32b4bcf442307901798ca92231aa4564ba62895d986ae3f
+public-adr-eth: 0x83f801040504fc6eC7BC364Ea2ec921a4B484a09
+private-key-ed25519: 5ff4d2213ca87b3c0f9f097f7544eb48c5ce456c9fa2d271dac57b1271004615
+private-key-eth: 30bbadacbd4484c43fdb25320b9da303aad0f2248933c8086e41abd01b0e6773
