@@ -1,0 +1,93 @@
+{
+    "$schema": "https://raw.githubusercontent.com/crossbario/crossbar/master/crossbar.json",
+    "version": 2,
+    "controller": {},
+    "workers": [
+        {
+            "type": "router",
+            "realms": [
+                {
+                    "name": "realm1",
+                    "roles": [
+                        {
+                            "name": "anonymous",
+                            "permissions": [
+                                {
+                                    "uri": "",
+                                    "match": "prefix",
+                                    "allow": {
+                                        "call": true,
+                                        "register": true,
+                                        "publish": true,
+                                        "subscribe": true
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": true
+                                    },
+                                    "cache": false
+                                }
+                            ]
+                        },
+                        {
+                            "name": "router2router",
+                            "permissions": [{
+                                "uri": "",
+                                "match": "prefix",
+                                "allow": {
+                                    "call": true,
+                                    "register": true,
+                                    "publish": true,
+                                    "subscribe": true
+                                },
+                                "disclose": {
+                                    "caller": true,
+                                    "publisher": true
+                                },
+                                "cache": false
+                            }]
+                        }
+                    ]
+                }
+            ],
+            "transports": [
+                {
+                    "type": "websocket",
+                    "endpoint": {
+                        "type": "tcp",
+                        "port": 8081
+                    },
+                    "options": {},
+                    "serializers": [
+                        "cbor"
+                    ]
+                },
+                {
+                    "type": "websocket",
+                    "endpoint": {
+                        "type": "tcp",
+                        "port": 7070
+                    },
+                    "options": {
+                        "max_message_size": 1048576
+                    },
+                    "serializers": ["cbor"],
+                    "auth": {
+                        "cryptosign": {
+                            "type": "static",
+                            "principals": {
+                                "hub": {
+                                    "realm": "realm1",
+                                    "role": "router2router",
+                                    "authorized_keys": [
+                                        "0532c5d76bd45f5b204870a761ed9887ecc5454c7d4e2b66a95552b510bf371e"
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}
