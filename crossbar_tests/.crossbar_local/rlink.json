@@ -57,7 +57,7 @@
                     "type": "websocket",
                     "endpoint": {
                         "type": "tcp",
-                        "port": 8080
+                        "port": 56789
                     },
                     "options": {},
                     "serializers": [
