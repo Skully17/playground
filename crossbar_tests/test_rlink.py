@@ -224,6 +224,75 @@ class TestRLinkForwardingFunctionality(IsolatedAsyncioTestCase):
         print(f"func2: {message}")
         self.func2_called = True
 
+    async def start_routers_and_clients(self):
+        loop = asyncio.get_event_loop()
+        self.local_router = await start_router(log_dir="crossbar_local", config="rlink")
+        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+        await wait_for_rlink_connection()
+        self.local_client.start(loop)
+        self.remote_client.start(loop)
+        await self.wait_for_join()
+
+    async def start_routers_and_clients_late_remote_start(self):
+        loop = asyncio.get_event_loop()
+        self.local_router = await start_router(log_dir="crossbar_local", config="rlink")
+        self.local_client.start(loop)
+        await self.wait_for_join(remote=False)
+        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+        await wait_for_rlink_connection()
+        self.remote_client.start(loop)
+        await self.wait_for_join()
+
+    async def local_call_and_publish_test(self):
+        print("calling")
+        await self.local_session.call("com.remote.1", "local call")
+        print("publishing")
+        publish(self.local_session, "com.remote.2", "local publish")
+        await asyncio.sleep(1)
+
+        self.assertTrue(self.func1_called)
+        self.assertTrue(self.func2_called)
+
+    async def remote_call_and_publish_test(self):
+        print("calling")
+        await self.remote_session.call("com.local.1", "remote call")
+        print("publishing")
+        publish(self.remote_session, "com.local.2", "remote publish")
+        await asyncio.sleep(1)
+
+        self.assertTrue(self.func1_called)
+        self.assertTrue(self.func2_called)
+
+    async def restart_local_client(self):
+        loop = asyncio.get_event_loop()
+        self.local_client.stop()
+        self.local_session = None
+        await asyncio.sleep(1)
+        self.local_client.start(loop)
+        await self.wait_for_join()
+
+    async def restart_remote_client(self):
+        loop = asyncio.get_event_loop()
+        self.remote_client.stop()
+        self.remote_session = None
+        await asyncio.sleep(1)
+        self.remote_client.start(loop)
+        await self.wait_for_join()
+
+    async def restart_local_router(self):
+        stop_router(self.local_router)
+        self.local_session = None
+        self.local_router = await start_router(log_dir="crossbar_local", config="rlink")
+        await wait_for_rlink_connection()
+        await self.wait_for_join()
+
+    async def restart_remote_router(self):
+        stop_router(self.remote_router)
+        self.remote_session = None
+        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+        await wait_for_rlink_connection()
+        await self.wait_for_join()
+
     async def test_local_to_remote_late_connect(self):
         @self.local_client.on_join
         async def _(session: ApplicationSession, details):
@@ -237,23 +306,9 @@ class TestRLinkForwardingFunctionality(IsolatedAsyncioTestCase):
             session.register(self.func1, "com.remote.1")
             session.subscribe(self.func2, "com.remote.2")
 
-        loop = asyncio.get_event_loop()
-        self.local_router = await start_router(log_dir="crossbar_local", config="rlink")
-        self.local_client.start(loop)
-        await self.wait_for_join(remote=False)
-        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
-        await wait_for_rlink_connection()
-        self.remote_client.start(loop)
-        await self.wait_for_join()
+        await self.start_routers_and_clients_late_remote_start()
 
-        print("calling")
-        await self.local_session.call("com.remote.1", "local call")
-        print("publishing")
-        publish(self.local_session, "com.remote.2", "local publish")
-        await asyncio.sleep(1)
-
-        self.assertTrue(self.func1_called)
-        self.assertTrue(self.func2_called)
+        await self.local_call_and_publish_test()
 
     async def test_remote_to_local_late_connect(self):
         @self.local_client.on_join
@@ -268,23 +323,11 @@ class TestRLinkForwardingFunctionality(IsolatedAsyncioTestCase):
             print("remote client joined router")
             self.remote_session = session
 
-        loop = asyncio.get_event_loop()
-        self.local_router = await start_router(log_dir="crossbar_local", config="rlink")
-        self.local_client.start(loop)
-        await self.wait_for_join(remote=False)
-        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
-        await wait_for_rlink_connection()
-        self.remote_client.start(loop)
-        await self.wait_for_join()
+        await self.start_routers_and_clients_late_remote_start()
 
-        await self.remote_session.call("com.local.1", "remote call")
-        publish(self.remote_session, "com.local.2", "remote publish")
-        await asyncio.sleep(1)
+        await self.remote_call_and_publish_test()
 
-        self.assertTrue(self.func1_called)
-        self.assertTrue(self.func2_called)
-
-    async def test_local_to_remote_restart_remote(self):
+    async def test_local_to_remote_restart_local_router(self):
         @self.local_client.on_join
         async def _(session: ApplicationSession, details):
             print("local client joined router")
@@ -297,31 +340,12 @@ class TestRLinkForwardingFunctionality(IsolatedAsyncioTestCase):
             session.register(self.func1, "com.remote.1")
             session.subscribe(self.func2, "com.remote.2")
 
-        loop = asyncio.get_event_loop()
-        self.local_router = await start_router(log_dir="crossbar_local", config="rlink")
-        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
-        await wait_for_rlink_connection()
-        self.local_client.start(loop)
-        self.remote_client.start(loop)
-        await self.wait_for_join()
+        await self.start_routers_and_clients()
+        await self.restart_local_router()
 
-        # The remote router is "restarted"
-        stop_router(self.remote_router)
-        self.remote_session = None
-        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
-        await wait_for_rlink_connection()
-        await self.wait_for_join(local=False)
+        await self.local_call_and_publish_test()
 
-        print("calling")
-        await self.local_session.call("com.remote.1", "local call")
-        print("publishing")
-        publish(self.local_session, "com.remote.2", "local publish")
-        await asyncio.sleep(1)
-
-        self.assertTrue(self.func1_called)
-        self.assertTrue(self.func2_called)
-
-    async def test_remote_to_local_restart_remote(self):
+    async def test_remote_to_local_restart_local_router(self):
         @self.local_client.on_join
         async def _(session: ApplicationSession, details):
             print("local client joined router")
@@ -334,20 +358,118 @@ class TestRLinkForwardingFunctionality(IsolatedAsyncioTestCase):
             print("remote client joined router")
             self.remote_session = session
 
-        loop = asyncio.get_event_loop()
-        self.local_router = await start_router(log_dir="crossbar_local", config="rlink")
-        self.local_client.start(loop)
-        await self.wait_for_join(remote=False)
-        self.remote_router = await start_router(log_dir="crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
-        self.remote_client.start(loop)
-        await self.wait_for_join()
+        await self.start_routers_and_clients()
+        await self.restart_local_router()
 
-        await self.remote_session.call("com.local.1", "remote call")
-        publish(self.remote_session, "com.local.2", "remote publish")
-        await asyncio.sleep(1)
+        await self.remote_call_and_publish_test()
 
-        self.assertTrue(self.func1_called)
-        self.assertTrue(self.func2_called)
+    async def test_local_to_remote_restart_remote_router(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+            session.register(self.func1, "com.remote.1")
+            session.subscribe(self.func2, "com.remote.2")
+
+        await self.start_routers_and_clients()
+        await self.restart_remote_router()
+
+        await self.local_call_and_publish_test()
+
+    async def test_remote_to_local_restart_remote_router(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+            session.register(self.func1, "com.local.1")
+            session.subscribe(self.func2, "com.local.2")
+
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+
+        await self.start_routers_and_clients()
+        await self.restart_remote_router()
+
+        await self.remote_call_and_publish_test()
+
+    async def test_local_to_remote_restart_local_client(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+            session.register(self.func1, "com.remote.1")
+            session.subscribe(self.func2, "com.remote.2")
+
+        await self.start_routers_and_clients()
+        await self.restart_local_client()
+
+        await self.local_call_and_publish_test()
+
+    async def test_remote_to_local_restart_local_client(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+            session.register(self.func1, "com.local.1")
+            session.subscribe(self.func2, "com.local.2")
+
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+
+        await self.start_routers_and_clients()
+        await self.restart_local_client()
+
+        await self.remote_call_and_publish_test()
+
+    async def test_local_to_remote_restart_remote_client(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+            session.register(self.func1, "com.remote.1")
+            session.subscribe(self.func2, "com.remote.2")
+
+        await self.start_routers_and_clients()
+        await self.restart_remote_client()
+
+        await self.local_call_and_publish_test()
+
+    async def test_remote_to_local_restart_remote_client(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+            session.register(self.func1, "com.local.1")
+            session.subscribe(self.func2, "com.local.2")
+
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+
+        await self.start_routers_and_clients()
+        await self.restart_remote_client()
+
+        await self.remote_call_and_publish_test()
 
 
 async def wait_for_rlink_connection(log_dir="/tmp/crossbar_local"):
@@ -355,7 +477,7 @@ async def wait_for_rlink_connection(log_dir="/tmp/crossbar_local"):
     success = "RLinkRemoteSession.onJoin()"
     rlink_not_connected = True
     tries = 0
-    while rlink_not_connected or tries > 10:
+    while rlink_not_connected and tries < 10:
         with open(f"{log_dir}/node.log", "r+") as fp:
             for line_no, line in enumerate(fp):
                 if success in line:
@@ -365,13 +487,21 @@ async def wait_for_rlink_connection(log_dir="/tmp/crossbar_local"):
         await asyncio.sleep(1)
         tries += 1
 
+
 async def start_router(log_dir="crossbar_tests", cbdir="../.crossbar_local", config="config", event_listener=False):
     """Starts Crossbar Router and waits for it to finish the initial setup"""
     # empty log files so there is no contamination with previously run routers
-    with open(f"/tmp/crossbar_local/node.log", "w") as fp:
-        fp.truncate(0)
-    with open(f"/tmp/crossbar_remote/node.log", "w") as fp:
-        fp.truncate(0)
+    # todo: These try/excepts are an attempt to fix the error on first run when the log file doesn't exist but did not work
+    try:
+        with open(f"/tmp/crossbar_local/node.log", "w") as fp:
+            fp.truncate(0)
+    except:
+        pass
+    try:
+        with open(f"/tmp/crossbar_remote/node.log", "w") as fp:
+            fp.truncate(0)
+    except:
+        pass
 
     router = await asyncio.create_subprocess_shell(
         f"crossbar start --logdir=/tmp/{log_dir} --logtofile --cbdir={cbdir} --config={config}.json",
