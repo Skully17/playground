@@ -8,6 +8,9 @@ from autobahn.wamp.types import PublishOptions
 
 
 class TestCrossbarBase(IsolatedAsyncioTestCase):
+    """
+    This class holds commonly used information that are used in all tests in this file
+    """
     async def asyncSetUp(self) -> None:
         self.func1_called = False
         self.local_session: Optional[ApplicationSession] = None
@@ -25,6 +28,9 @@ class TestCrossbarBase(IsolatedAsyncioTestCase):
 
 
 class TestCrossbarRlinkBase(TestCrossbarBase):
+    """
+    This class holds commanly used information that is used by tests using RLinks.
+    """
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         self.remote_session: Optional[ApplicationSession] = None
@@ -40,6 +46,13 @@ class TestCrossbarRlinkBase(TestCrossbarBase):
         self.func2_called = True
 
     async def wait_for_join(self, local=True, remote=True):
+        """
+        Waits for the clients to finnish connecting to a Crossbar router.
+        Will eventually time out if no connection is ever made
+        :param local: Weather or not to wait for the local client to connect
+        :param remote: Weather or not to wait for the remote client to connect
+        :return: None
+        """
         attempt = 0
         while True:
             if (self.local_session or not local) and (self.remote_session or not remote) or not attempt < 60:
