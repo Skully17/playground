@@ -7,6 +7,14 @@ from autobahn.asyncio import component, ApplicationSession
 from autobahn.wamp.types import PublishOptions
 
 
+LOCAL_CROSSBAR_LOGDIR = "/tmp/crossbar_local"
+REMOTE_CROSSBAR_LOGDIR = "/tmp/crossbar_remote"
+LOCAL_CROSSBAR_CBDIR = "../.crossbar_local"
+REMOTE_CROSSBAR_CBDIR = "../.crossbar_remote"
+CLIENT_JOIN_TIMEOUT = 60
+RLINK_JOIN_TIMEOUT = 60
+
+
 class TestCrossbarBase(IsolatedAsyncioTestCase):
     """
     This class holds commonly used information that are used in all tests in this file
@@ -19,6 +27,10 @@ class TestCrossbarBase(IsolatedAsyncioTestCase):
         local_transports = basic_config(self.host, local_port)
         self.local_client = component.Component(transports=local_transports, realm="realm1")
         self.local_router = None
+        create_log(LOCAL_CROSSBAR_LOGDIR)
+
+    def tearDown(self) -> None:
+        delete_log(LOCAL_CROSSBAR_LOGDIR)
 
     def func1(self, message):
         out = f"func1: {message}"
@@ -40,6 +52,11 @@ class TestCrossbarRlinkBase(TestCrossbarBase):
         self.remote_client = component.Component(transports=remote_transports, realm="realm1")
         self.remote_client.on_join(self.on_join_remote)
         self.local_client.on_join(self.on_join_local)
+        create_log(REMOTE_CROSSBAR_LOGDIR)
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        delete_log(REMOTE_CROSSBAR_LOGDIR)
 
     def func2(self, message):
         print(f"func2: {message}")
@@ -55,7 +72,8 @@ class TestCrossbarRlinkBase(TestCrossbarBase):
         """
         attempt = 0
         while True:
-            if (self.local_session or not local) and (self.remote_session or not remote) or not attempt < 60:
+            if (self.local_session or not local) and (self.remote_session or not remote) or \
+                    not attempt < CLIENT_JOIN_TIMEOUT:
                 break
             attempt += 1
             await asyncio.sleep(1)
@@ -80,9 +98,10 @@ class TestCrossbarRlinkBase(TestCrossbarBase):
 class TestWAMPFunctionality(TestCrossbarBase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
-        self.local_router = await start_router()
+        self.local_router = await start_router(logdir=LOCAL_CROSSBAR_LOGDIR, cbdir=LOCAL_CROSSBAR_CBDIR)
 
     def tearDown(self) -> None:
+        super().tearDown()
         stop_router(self.local_router)
 
     async def test_rpc(self):
@@ -117,11 +136,13 @@ class TestWAMPFunctionality(TestCrossbarBase):
 class TestRLinkWAMPFunctionality(TestCrossbarRlinkBase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
-        self.local_router = await start_router(config="rlink")
+        self.local_router = await start_router(
+            logdir=LOCAL_CROSSBAR_LOGDIR, cbdir=LOCAL_CROSSBAR_CBDIR, config="rlink")
         self.remote_router = await start_router(
-            log_dir="/tmp/crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+            logdir=REMOTE_CROSSBAR_LOGDIR, cbdir=REMOTE_CROSSBAR_CBDIR, config="rlink")
 
     def tearDown(self) -> None:
+        super().tearDown()
         stop_router(self.local_router)
         stop_router(self.remote_router)
 
@@ -198,7 +219,7 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
         self.func2_called = False
 
     def tearDown(self) -> None:
-        print("tearDown Called")
+        super().tearDown()
         if self.local_client:
             self.local_client.stop()
         if self.remote_client:
@@ -208,14 +229,12 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
         if self.remote_router:
             stop_router(self.remote_router)
 
-        delete_log()
-        delete_log(log_dir="/tmp/crossbar_remote")
-
     async def start_routers_and_clients(self):
         loop = asyncio.get_event_loop()
-        self.local_router = await start_router(config="rlink")
+        self.local_router = await start_router(
+            logdir=LOCAL_CROSSBAR_LOGDIR, cbdir=LOCAL_CROSSBAR_CBDIR, config="rlink")
         self.remote_router = await start_router(
-            log_dir="/tmp/crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+            logdir=REMOTE_CROSSBAR_LOGDIR, cbdir=REMOTE_CROSSBAR_CBDIR, config="rlink")
         await wait_for_rlink_connection()
         self.local_client.start(loop)
         self.remote_client.start(loop)
@@ -224,21 +243,23 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
     async def start_routers_and_clients_late_local_start(self):
         loop = asyncio.get_event_loop()
         self.remote_router = await start_router(
-            log_dir="/tmp/crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+            logdir=REMOTE_CROSSBAR_LOGDIR, cbdir=REMOTE_CROSSBAR_CBDIR, config="rlink")
         self.remote_client.start(loop)
         await self.wait_for_join(local=False)
-        self.local_router = await start_router(config="rlink")
+        self.local_router = await start_router(
+            logdir=LOCAL_CROSSBAR_LOGDIR, cbdir=LOCAL_CROSSBAR_CBDIR, config="rlink")
         await wait_for_rlink_connection()
         self.local_client.start(loop)
         await self.wait_for_join()
 
     async def start_routers_and_clients_late_remote_start(self):
         loop = asyncio.get_event_loop()
-        self.local_router = await start_router(config="rlink")
+        self.local_router = await start_router(
+            logdir=LOCAL_CROSSBAR_LOGDIR, cbdir=LOCAL_CROSSBAR_CBDIR, config="rlink")
         self.local_client.start(loop)
         await self.wait_for_join(remote=False)
         self.remote_router = await start_router(
-            log_dir="/tmp/crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+            logdir=REMOTE_CROSSBAR_LOGDIR, cbdir=REMOTE_CROSSBAR_CBDIR, config="rlink")
         await wait_for_rlink_connection()
         self.remote_client.start(loop)
         await self.wait_for_join()
@@ -282,14 +303,16 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
     async def restart_local_router(self):
         stop_router(self.local_router)
         self.local_session = None
-        self.local_router = await start_router(config="rlink")
+        self.local_router = await start_router(
+            logdir=LOCAL_CROSSBAR_LOGDIR, cbdir=LOCAL_CROSSBAR_CBDIR, config="rlink")
         await wait_for_rlink_connection()
         await self.wait_for_join()
 
     async def restart_remote_router(self):
         stop_router(self.remote_router)
         self.remote_session = None
-        self.remote_router = await start_router(log_dir="/tmp/crossbar_remote", cbdir="../.crossbar_remote", config="rlink")
+        self.remote_router = await start_router(
+            logdir=REMOTE_CROSSBAR_LOGDIR, cbdir=REMOTE_CROSSBAR_CBDIR, config="rlink")
         await wait_for_rlink_connection()
         await self.wait_for_join()
 
@@ -452,11 +475,11 @@ def basic_config(host, port):
     }]
 
 
-async def wait_for_rlink_connection(log_dir="/tmp/crossbar_local"):
+async def wait_for_rlink_connection(log_dir=LOCAL_CROSSBAR_LOGDIR):
     success = "RLinkRemoteSession.onJoin()"
     rlink_not_connected = True
     tries = 0
-    while rlink_not_connected and tries < 10:
+    while rlink_not_connected and tries < RLINK_JOIN_TIMEOUT:
         with open(f"{log_dir}/node.log", "r") as fp:
             for line_no, line in enumerate(fp):
                 if success in line:
@@ -467,14 +490,14 @@ async def wait_for_rlink_connection(log_dir="/tmp/crossbar_local"):
         tries += 1
 
 
-async def start_router(log_dir="/tmp/crossbar_local", cbdir="../.crossbar_local", config="config", event_listener=False):
+async def start_router(logdir, cbdir, config="config", event_listener=False):
     """Starts Crossbar Router and waits for it to finish the initial setup"""
     # empty log files so there is no contamination with previously run routers
-    delete_log()
-    delete_log(log_dir="/tmp/crossbar_remote")
+    clear_log(LOCAL_CROSSBAR_LOGDIR)
+    clear_log(REMOTE_CROSSBAR_LOGDIR)
 
     router = await asyncio.create_subprocess_shell(
-        f"crossbar start --logdir={log_dir} --logtofile --cbdir={cbdir} --config={config}.json",
+        f"crossbar start --logdir={logdir} --logtofile --cbdir={cbdir} --config={config}.json",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         preexec_fn=os.setsid
@@ -511,11 +534,23 @@ async def error_listener(process):
     print(out)
 
 
-def delete_log(log_dir="/tmp/crossbar_local"):
-    # todo: These try/excepts are an attempt to fix the error on first run when the log file doesn't exist but did not work
-    try:
-        with open(f"{log_dir}/node.log", "r+") as fp:
+def create_log(logdir):
+    if not os.path.exists(logdir):
+        os.mkdir(logdir)
+    with open(f"{logdir}/node.log", "w") as fp:
+        fp.write("START LOGGING FOR CROSSBAR TESTS\n")
+
+
+def clear_log(logdir):
+    if os.path.exists(logdir):
+        with open(f"{logdir}/node.log", "r+") as fp:
             # print(fp.read())  # for debugging
             fp.truncate(0)
-    except:
-        pass
+
+
+def delete_log(logdir):
+    log_file = f"{logdir}/node.log"
+    if os.path.exists(logdir):
+        if os.path.exists(log_file):
+            os.remove(log_file)
+        os.rmdir(logdir)
