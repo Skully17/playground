@@ -66,8 +66,8 @@ class TestCrossbarRlinkBase(TestCrossbarBase):
         """
         Waits for the clients to finnish connecting to a Crossbar router.
         Will eventually time out if no connection is ever made
-        :param local: Weather or not to wait for the local client to connect
-        :param remote: Weather or not to wait for the remote client to connect
+        :param local: Whether to wait for the local client to connect
+        :param remote: Whether to wait for the remote client to connect
         :return: None
         """
         attempt = 0
@@ -146,7 +146,7 @@ class TestRLinkWAMPFunctionality(TestCrossbarRlinkBase):
         stop_router(self.local_router)
         stop_router(self.remote_router)
 
-    async def test_local_to_local_rpc(self):  # todo: make 2 tests to register and call after and before the rlink connection
+    async def test_local_to_local_rpc(self):
         @self.local_client.on_join
         async def _(session: ApplicationSession, details):
             print("local client joined router")
@@ -528,8 +528,6 @@ def publish(session: ApplicationSession, topic, *args, **kwargs):
 async def error_listener(process):
     out, error = await process.communicate()
     if error:
-        # stop_router(process)
-        # raise Exception(error)
         print(error)
     print(out)
 
@@ -544,7 +542,6 @@ def create_log(logdir):
 def clear_log(logdir):
     if os.path.exists(logdir):
         with open(f"{logdir}/node.log", "r+") as fp:
-            # print(fp.read())  # for debugging
             fp.truncate(0)
 
 
