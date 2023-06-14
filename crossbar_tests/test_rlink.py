@@ -41,7 +41,7 @@ class TestCrossbarBase(IsolatedAsyncioTestCase):
         return out
 
 
-class TestCrossbarRlinkBase(TestCrossbarBase):
+class TestCrossbarRLinkBase(TestCrossbarBase):
     """
     This class holds commanly used information that is used by tests using RLinks.
     """
@@ -136,7 +136,7 @@ class TestWAMPFunctionality(TestCrossbarBase):
         self.assertTrue(self.func1_called)
 
 
-class TestRLinkWAMPFunctionality(TestCrossbarRlinkBase):
+class TestRLinkWAMPFunctionality(TestCrossbarRLinkBase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         self.local_router = await start_router(
@@ -285,7 +285,7 @@ class TestRLinkWAMPFunctionality(TestCrossbarRlinkBase):
         self.assertTrue(self.func1_called)
 
 
-class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
+class TestRLinkForwardingFunctionality(TestCrossbarRLinkBase):
     def tearDown(self) -> None:
         super().tearDown()
         if self.local_client:
@@ -462,6 +462,7 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
 
         await self.local_call_and_publish_test()
 
+    # todo: this still fails on rare occasions, seemingly when running all tests
     async def test_remote_to_local_restart_local_client(self):
         self.local_client.on_join(self.on_join_local_reg_sub)
         await self.start_routers_and_clients()
@@ -522,13 +523,13 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
         try:
             await self.local_session.call("com.local.1", "local call")
         except ApplicationError:
-            print("call 3 failed (expected)")
+            print("local call failed (expected)")
         else:
             assert False
         try:
-            await self.local_session.call("com.local.1", "remote call")
+            await self.remote_session.call("com.local.1", "remote call")
         except ApplicationError:
-            print("call 4 failed (expected)")
+            print("remote call failed (expected)")
         else:
             assert False
 
@@ -541,15 +542,79 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
         try:
             await self.local_session.call("com.remote.1", "local call")
         except ApplicationError:
-            print("call 3 failed (expected)")
+            print("local call failed (expected)")
         else:
             assert False
         try:
             await self.remote_session.call("com.remote.1", "remote call")
         except ApplicationError:
-            print("call 4 failed (expected)")
+            print("remote call failed (expected)")
         else:
             assert False
+
+    async def test_local_unsubscribe(self):
+        await self.start_routers_and_clients()
+        mock_func = AsyncMock()
+        test_sub = await self.local_session.subscribe(mock_func, "com.local.1")
+
+        await test_sub.unsubscribe()
+
+        publish(self.local_session, "com.local.1", "local publish")
+        publish(self.remote_session, "com.local.1", "remote publish")
+        await asyncio.sleep(1)
+        mock_func.assert_not_called()
+
+    async def test_remote_unsubscribe(self):
+        await self.start_routers_and_clients()
+        mock_func = AsyncMock()
+        test_sub = await self.remote_session.subscribe(mock_func, "com.remote.1")
+
+        await test_sub.unsubscribe()
+
+        publish(self.local_session, "com.remote.1", "local publish")
+        publish(self.remote_session, "com.remote.1", "remote publish")
+        await asyncio.sleep(1)
+        mock_func.assert_not_called()
+
+    async def test_local_multiple_subscriptions(self):
+        await self.start_routers_and_clients()
+        mock_func_1 = AsyncMock()
+        mock_func_2 = AsyncMock()
+        mock_func_3 = AsyncMock()
+        await self.local_session.subscribe(mock_func_1, "com.local.1")
+        await self.local_session.subscribe(mock_func_2, "com.local.1")
+        await self.local_session.subscribe(mock_func_3, "com.local.1")
+
+        publish(self.local_session, "com.local.1", "local publish")
+        publish(self.local_session, "com.local.1", "remote publish")
+        await asyncio.sleep(1)
+
+        mock_func_1.assert_any_call("local publish")
+        mock_func_2.assert_any_call("local publish")
+        mock_func_3.assert_any_call("local publish")
+        mock_func_1.assert_any_call("remote publish")
+        mock_func_2.assert_any_call("remote publish")
+        mock_func_3.assert_any_call("remote publish")
+
+    async def test_remote_multiple_subscriptions(self):
+        await self.start_routers_and_clients()
+        mock_func_1 = AsyncMock()
+        mock_func_2 = AsyncMock()
+        mock_func_3 = AsyncMock()
+        await self.remote_session.subscribe(mock_func_1, "com.remote.1")
+        await self.remote_session.subscribe(mock_func_2, "com.remote.1")
+        await self.remote_session.subscribe(mock_func_3, "com.remote.1")
+
+        publish(self.remote_session, "com.remote.1", "local publish")
+        publish(self.remote_session, "com.remote.1", "remote publish")
+        await asyncio.sleep(1)
+
+        mock_func_1.assert_any_call("local publish")
+        mock_func_2.assert_any_call("local publish")
+        mock_func_3.assert_any_call("local publish")
+        mock_func_1.assert_any_call("remote publish")
+        mock_func_2.assert_any_call("remote publish")
+        mock_func_3.assert_any_call("remote publish")
 
 
 def basic_config(host, port):
