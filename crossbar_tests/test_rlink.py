@@ -2,9 +2,11 @@ import os
 import signal
 import asyncio
 from typing import Optional
-from unittest import IsolatedAsyncioTestCase, skip
+from unittest import IsolatedAsyncioTestCase
+from unittest.mock import AsyncMock
 from autobahn.asyncio import component, ApplicationSession
 from autobahn.wamp.types import PublishOptions
+from autobahn.wamp.exception import ApplicationError
 
 
 LOCAL_CROSSBAR_LOGDIR = "/tmp/crossbar_local"
@@ -45,6 +47,7 @@ class TestCrossbarRlinkBase(TestCrossbarBase):
     """
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
+        self.func2_called = False
         self.remote_session: Optional[ApplicationSession] = None
         self.remote_router = None
         remote_port = 56790
@@ -140,6 +143,7 @@ class TestRLinkWAMPFunctionality(TestCrossbarRlinkBase):
             logdir=LOCAL_CROSSBAR_LOGDIR, cbdir=LOCAL_CROSSBAR_CBDIR, config="rlink")
         self.remote_router = await start_router(
             logdir=REMOTE_CROSSBAR_LOGDIR, cbdir=REMOTE_CROSSBAR_CBDIR, config="rlink")
+        await wait_for_rlink_connection()
 
     def tearDown(self) -> None:
         super().tearDown()
@@ -212,12 +216,76 @@ class TestRLinkWAMPFunctionality(TestCrossbarRlinkBase):
 
         self.assertTrue(self.func1_called)
 
+    async def test_local_to_local_pub_sub(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+            test_uri = "com.local.1"
+            session.subscribe(self.func1, test_uri)
+            publish(session, test_uri, "local call")
+
+        loop = asyncio.get_event_loop()
+        self.local_client.start(loop)
+        self.remote_client.start(loop)
+        await self.wait_for_join()
+
+        self.assertTrue(self.func1_called)
+
+    async def test_remote_to_remote_pub_sub(self):
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+            test_uri = "com.remote.1"
+            session.subscribe(self.func1, test_uri)
+            publish(session, test_uri, "remote call")
+
+        loop = asyncio.get_event_loop()
+        self.local_client.start(loop)
+        self.remote_client.start(loop)
+        await self.wait_for_join()
+
+        self.assertTrue(self.func1_called)
+
+    async def test_local_to_remote_pub_sub(self):
+        @self.remote_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("remote client joined router")
+            self.remote_session = session
+            test_uri = "com.remote.1"
+            session.subscribe(self.func1, test_uri)
+
+        loop = asyncio.get_event_loop()
+        self.local_client.start(loop)
+        self.remote_client.start(loop)
+        await self.wait_for_join()
+
+        publish(self.local_session, "com.remote.1", "local call")
+        await asyncio.sleep(1)
+
+        self.assertTrue(self.func1_called)
+
+    async def test_remote_to_local_pub_sub(self):
+        @self.local_client.on_join
+        async def _(session: ApplicationSession, details):
+            print("local client joined router")
+            self.local_session = session
+            test_uri = "com.local.1"
+            session.subscribe(self.func1, test_uri)
+
+        loop = asyncio.get_event_loop()
+        self.local_client.start(loop)
+        self.remote_client.start(loop)
+        await self.wait_for_join()
+
+        publish(self.remote_session, "com.local.1", "remote call")
+        await asyncio.sleep(1)
+
+        self.assertTrue(self.func1_called)
+
 
 class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
-    async def asyncSetUp(self) -> None:
-        await super().asyncSetUp()
-        self.func2_called = False
-
     def tearDown(self) -> None:
         super().tearDown()
         if self.local_client:
@@ -418,47 +486,68 @@ class TestRLinkForwardingFunctionality(TestCrossbarRlinkBase):
 
         await self.remote_call_and_publish_test()
 
-    @skip("WIP: Testing re-registering as it doesn't seem to work properly")
-    async def test_unregister_restart_remote_router(self):
+    async def test_local_reregister(self):
+        mock_function = AsyncMock(return_value=True)
         self.local_client.on_join(self.on_join_local_reg_sub)
+        await self.start_routers_and_clients()
+        await self.local_registration.unregister()
+
+        await self.local_session.register(mock_function, "com.local.1")
+
+        await self.local_session.call("com.local.1", "local call")
+        await self.remote_session.call("com.local.1", "remote call")
+        mock_function.assert_any_call("local call")
+        mock_function.assert_any_call("remote call")
+
+    async def test_remote_reregister(self):
+        mock_function = AsyncMock(return_value=True)
         self.remote_client.on_join(self.on_join_remote_reg_sub)
         await self.start_routers_and_clients()
-        await self.restart_remote_router()
+        await self.remote_registration.unregister()
+
+        await self.remote_session.register(mock_function, "com.remote.1")
+        await asyncio.sleep(1)  # Needs some time to be forwarded over RLink
 
         await self.local_session.call("com.remote.1", "local call")
         await self.remote_session.call("com.remote.1", "remote call")
+        mock_function.assert_any_call("local call")
+        mock_function.assert_any_call("remote call")
+
+    async def test_local_unregister(self):
+        self.local_client.on_join(self.on_join_local_reg_sub)
+        await self.start_routers_and_clients()
+
         await self.local_registration.unregister()
-        await asyncio.sleep(1)
+
         try:
             await self.local_session.call("com.local.1", "local call")
-        except:
-            assert True
+        except ApplicationError:
+            print("call 3 failed (expected)")
         else:
             assert False
         try:
-            responce = await self.remote_session.call("com.local.1", "remote call")
-            print(f"yay 2: {responce}")
-        except:
-            assert True
+            await self.local_session.call("com.local.1", "remote call")
+        except ApplicationError:
+            print("call 4 failed (expected)")
         else:
-            assert True
-        await self.local_session.register("com.local.1", self.func2)
-        await self.local_session.call("com.local.1", "local call")
-        await self.remote_session.call("com.local.1", "remote call")
+            assert False
+
+    async def test_remote_unregister(self):
+        self.remote_client.on_join(self.on_join_remote_reg_sub)
+        await self.start_routers_and_clients()
 
         await self.remote_registration.unregister()
+
         try:
             await self.local_session.call("com.remote.1", "local call")
-            print("yay 3")
-        except:
-            assert True
+        except ApplicationError:
+            print("call 3 failed (expected)")
         else:
             assert False
         try:
             await self.remote_session.call("com.remote.1", "remote call")
-            print("yay 4")
-        except:
-            assert True
+        except ApplicationError:
+            print("call 4 failed (expected)")
         else:
             assert False
 
